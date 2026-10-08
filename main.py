@@ -455,7 +455,7 @@ async def telegram_webhook(request: Request):
             parts = callback_data.split(":")
             change_list = {
                 # action: [list db table name, message, ]
-                "changeloc": ["location_list", "Select a new category:", "updateloc"],
+                "changeloc": ["location_list", "Select a new location:", "updateloc"],
                 "changecat": ["category_list", "Select a new category:", "updatecat"],
                 "changest": ["status_list", "Select a new status:", "updatest"]
             }
@@ -468,11 +468,8 @@ async def telegram_webhook(request: Request):
                 [{"text": opt, "callback_data": f"{param[2]}:{item_id}:{opt}"}]
                 for opt in options
             ]
-            send_telegram_message(
-                chat_id, 
-                param[1], 
-                reply_markup={"inline_keyboard": buttons}
-            )
+            send_inline_keyboard(chat_id, param[1], buttons)
+
 
         # --- 2.2 SAVE SELECTION ---
         elif callback_data.startswith("update"):
