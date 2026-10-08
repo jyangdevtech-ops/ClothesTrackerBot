@@ -225,7 +225,7 @@ async def telegram_webhook(request: Request):
             }
 
             # Fetch categories dynamically from database
-            categories = fetch_options_from_db("categories_list") or ["Tops", "Bottoms", "Outerwear"]
+            categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
             buttons = [(cat, f"cat:{cat}") for cat in categories]
             send_inline_keyboard(chat_id, f"🖼️ Received **{item_name}**!\n\nSelect a **Category**:", buttons)
 
@@ -236,14 +236,14 @@ async def telegram_webhook(request: Request):
             
             if param:
                 # Direct location provided -> Prompt for category right away
-                categories = fetch_options_from_db("categories_list") or ["Tops", "Bottoms", "Outerwear"]
+                categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
                 buttons = [(cat, f"listcat:{param}:{cat}") for cat in categories]
                 buttons.append(("📦 All Categories", f"listcat:{param}:ALL"))
                 
                 send_inline_keyboard(chat_id, f"📍 Location: **{param}**\n\nSelect a **Category** to filter by:", buttons)
             else:
                 # Step 1: Prompt for Location first
-                locations = fetch_options_from_db("locations_list") or ["Manor", "GC"]
+                locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
                 buttons = [(loc, f"listloc:{loc}") for loc in locations]
                 
                 send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
@@ -281,7 +281,7 @@ async def telegram_webhook(request: Request):
             category = callback_data.split(":", 1)[1]
             session["category"] = category
 
-            locations = fetch_options_from_db("locations_list") or ["Manor", "GC"]
+            locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
             buttons = [(loc, f"loc:{loc}") for loc in locations]
             edit_message_text(chat_id, msg_id, f"🏷️ Category: **{category}**\n\nSelect a **Location**:", buttons)
 
@@ -333,7 +333,7 @@ async def telegram_webhook(request: Request):
         elif callback_data.startswith("listloc:"):
             location = callback_data.split(":", 1)[1]
             
-            categories = fetch_options_from_db("categories_list") or ["Tops", "Bottoms", "Outerwear"]
+            categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
             buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
             buttons.append(("📦 All Categories", f"listcat:{location}:ALL"))
             
