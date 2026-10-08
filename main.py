@@ -355,12 +355,8 @@ async def telegram_webhook(request: Request):
                             if not items:
                                 send_telegram_message(chat_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
                             else:
-                                detail_buttons = [(f"ℹ️ Details: #{item[0]} {item[1]}", f"detail:{item[0]}") for item in items]
-                                send_inline_keyboard(
-                                    chat_id, 
-                                    f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):", 
-                                    detail_buttons
-                                )
+                                list_items_by_location_and_category(chat_id, msg.get("message_id"), location, category)
+
                         else:
                             # Invalid category provided -> prompt with buttons using the extracted location
                             buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
