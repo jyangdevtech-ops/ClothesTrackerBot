@@ -211,296 +211,299 @@ def answer_callback_query(callback_id: str):
 
 @app.post("/webhook", dependencies=[Depends(verify_telegram_secret)])
 async def telegram_webhook(request: Request):
-    data = await request.json()
-    # Get user_id from message or callback_query
-    user_id = None
-    if "message" in data:
-        user_from = data["message"]["from"]
-        if user_from.get("is_bot", False):
-            return {"status": "ok"}
-        user_id = user_from["id"]
-        chat_id = data["message"]["chat"]["id"]
-    elif "callback_query" in data:
-        user_id = data["callback_query"]["from"]["id"]
-        chat_id = data["callback_query"]["message"]["chat"]["id"]
+    try:
+        data = await request.json()
+        # Get user_id from message or callback_query
+        user_id = None
+        if "message" in data:
+            user_from = data["message"]["from"]
+            if user_from.get("is_bot", False):
+                return {"status": "ok"}
+            user_id = user_from["id"]
+            chat_id = data["message"]["chat"]["id"]
+        elif "callback_query" in data:
+            user_id = data["callback_query"]["from"]["id"]
+            chat_id = data["callback_query"]["message"]["chat"]["id"]
 
-    # Reject unauthorized users
-    if not user_id or not is_authorized_user(user_id):
-        logger.warning(f"Unauthorized access attempt by user_id: {user_id}")
-        send_telegram_message(chat_id, "⛔ *Access Denied:* You are not authorized to access this closet database.")
-        return {"status": "forbidden"}
-    # -------------------------------------------------------------
-    # BRANCH A: Standard Messages (Text Commands & Photo Uploads)
-    # -------------------------------------------------------------
-    if "message" in data:
-        msg = data["message"]
-        chat_id = msg["chat"]["id"]
-        text = msg.get("text", "").strip()
+        # Reject unauthorized users
+        if not user_id or not is_authorized_user(user_id):
+            logger.warning(f"Unauthorized access attempt by user_id: {user_id}")
+            send_telegram_message(chat_id, "⛔ *Access Denied:* You are not authorized to access this closet database.")
+            return {"status": "forbidden"}
+        # -------------------------------------------------------------
+        # BRANCH A: Standard Messages (Text Commands & Photo Uploads)
+        # -------------------------------------------------------------
+        if "message" in data:
+            msg = data["message"]
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "").strip()
 
-        # 1. PHOTO UPLOAD -> Start "Add Clothes" Flow
-        if "photo" in msg:
-            file_id = msg["photo"][-1]["file_id"]
-            item_name = msg.get("caption", "Unnamed Item").strip()
+            # 1. PHOTO UPLOAD -> Start "Add Clothes" Flow
+            if "photo" in msg:
+                file_id = msg["photo"][-1]["file_id"]
+                item_name = msg.get("caption", "Unnamed Item").strip()
 
-            # Store state in memory
-            USER_SESSIONS[chat_id] = {
-                "file_id": file_id,
-                "item_name": item_name
-            }
+                # Store state in memory
+                USER_SESSIONS[chat_id] = {
+                    "file_id": file_id,
+                    "item_name": item_name
+                }
 
-            # Fetch categories dynamically from database
-            categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
-            buttons = [(cat, f"cat:{cat}") for cat in categories]
-            send_inline_keyboard(chat_id, f"🖼️ Received **{item_name}**!\n\nSelect a **Category**:", buttons)
-
-        # 2. COMMAND: /list [Location] -> Trigger "List Clothes" Flow
-        elif text.startswith("/list"):
-            # Check if user typed direct location (e.g., /list Manor) or wants interactive selection
-            param = text.replace("/list", "", 1).strip()
-            
-            if param:
-                # Direct location provided -> Prompt for category right away
+                # Fetch categories dynamically from database
                 categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
-                buttons = [(cat, f"listcat:{param}:{cat}") for cat in categories]
-                buttons.append(("📦 All Categories", f"listcat:{param}:ALL"))
+                buttons = [(cat, f"cat:{cat}") for cat in categories]
+                send_inline_keyboard(chat_id, f"🖼️ Received **{item_name}**!\n\nSelect a **Category**:", buttons)
+
+            # 2. COMMAND: /list [Location] -> Trigger "List Clothes" Flow
+            elif text.startswith("/list"):
+                # Check if user typed direct location (e.g., /list Manor) or wants interactive selection
+                param = text.replace("/list", "", 1).strip()
                 
-                send_inline_keyboard(chat_id, f"📍 Location: **{param}**\n\nSelect a **Category** to filter by:", buttons)
+                if param:
+                    # Direct location provided -> Prompt for category right away
+                    categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
+                    buttons = [(cat, f"listcat:{param}:{cat}") for cat in categories]
+                    buttons.append(("📦 All Categories", f"listcat:{param}:ALL"))
+                    
+                    send_inline_keyboard(chat_id, f"📍 Location: **{param}**\n\nSelect a **Category** to filter by:", buttons)
+                else:
+                    # Step 1: Prompt for Location first
+                    locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
+                    buttons = [(loc, f"listloc:{loc}") for loc in locations]
+                    
+                    send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
+
+            # update item name
+            elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id].get("state") == "awaiting_new_name":
+                USER_SESSIONS[chat_id]["state"] = ""
+                item_id = USER_SESSIONS[chat_id]["item_id"]
+                success = update_item_field(item_id, "item_name", text)
+                reply = f"✅ Name updated to **{text}**!" if success else "❌ Failed to update name."
+                send_telegram_message(chat_id, reply)
+                return {"status": "ok"}
+
+            # update item comments
+            elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id].get("state") == "awaiting_new_comment":
+                USER_SESSIONS[chat_id]["state"] = ""
+                item_id = USER_SESSIONS[chat_id]["item_id"]
+                success = update_item_field(item_id, "comments", text)
+                reply = f"✅ Comment updated to **{text}**!" if success else "❌ Failed to update comment."
+                send_telegram_message(chat_id, reply)
+                return {"status": "ok"}
+
+
+            # 3. COMMAND: /start -- default
             else:
-                # Step 1: Prompt for Location first
-                locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
-                buttons = [(loc, f"listloc:{loc}") for loc in locations]
-                
-                send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
-
-        # update item name
-        elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id]["state"] == "awaiting_new_name":
-            USER_SESSIONS[chat_id]["state"] = ""
-            item_id = USER_SESSIONS[chat_id]["item_id"]
-            success = update_item_field(item_id, "item_name", text)
-            reply = f"✅ Name updated to **{text}**!" if success else "❌ Failed to update name."
-            send_telegram_message(chat_id, reply)
-            return {"status": "ok"}
-
-        # update item comments
-        elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id]["state"] == "awaiting_new_comment":
-            USER_SESSIONS[chat_id]["state"] = ""
-            item_id = USER_SESSIONS[chat_id]["item_id"]
-            success = update_item_field(item_id, "comments", text)
-            reply = f"✅ Comment updated to **{text}**!" if success else "❌ Failed to update comment."
-            send_telegram_message(chat_id, reply)
-            return {"status": "ok"}
-
-
-        # 3. COMMAND: /start -- default
-        else:
-            welcome_text = (
-                "👋 **Welcome to Closet Tracker!**\n\n"
-                "• **To Add Clothes:** Simply send a **photo** with a caption (e.g., *Black Hoodie*).\n"
-                "• **To List Clothes:** Type `/list [Location]` (e.g., `/list Manor` or `/list GC`)."
-            )
-            send_inline_keyboard(chat_id, welcome_text, [])
-
-    # -------------------------------------------------------------
-    # BRANCH B: Callback Queries (Inline Button Click Events)
-    # -------------------------------------------------------------
-    elif "callback_query" in data:
-        cb = data["callback_query"]
-        callback_id = cb["id"]
-        chat_id = cb["message"]["chat"]["id"]
-        msg_id = cb["message"]["message_id"]
-        callback_data = cb["data"]
-
-        answer_callback_query(callback_id)
-
-        # --- SUB-FLOW 1: ADD ITEM STEPS ---
-        
-        # Step 1: Category Selected -> Prompt for Location
-        if callback_data.startswith("cat:"):
-            session = USER_SESSIONS.get(chat_id)
-            if not session:
-                edit_message_text(chat_id, msg_id, "⚠️ Session expired. Please re-upload the photo.")
-                return {"status": "ok"}
-
-            category = callback_data.split(":", 1)[1]
-            session["category"] = category
-
-            locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
-            buttons = [(loc, f"loc:{loc}") for loc in locations]
-            edit_message_text(chat_id, msg_id, f"🏷️ Category: **{category}**\n\nSelect a **Location**:", buttons)
-
-        # Step 2: Location Selected -> Finalize & Save to DB, status default to clean
-        elif callback_data.startswith("loc:"):
-            session = USER_SESSIONS.get(chat_id)
-            if not session:
-                edit_message_text(chat_id, msg_id, "⚠️ Session expired. Please re-upload the photo.")
-                return {"status": "ok"}
-
-            location = callback_data.split(":", 1)[1]
-            session["location"] = location
-            session["status"] = "Clean"
-
-            success = save_item_to_db(session)
-            if success:
-                summary = (
-                    f"✅ **Item Saved!**\n\n"
-                    f"• **Item:** {session['item_name']}\n"
-                    f"• **Category:** {session['category']}\n"
-                    f"• **Location:** {session['location']}\n"
-                    f"• **Status:** {session['status']}"
+                welcome_text = (
+                    "👋 **Welcome to Closet Tracker!**\n\n"
+                    "• **To Add Clothes:** Simply send a **photo** with a caption (e.g., *Black Hoodie*).\n"
+                    "• **To List Clothes:** Type `/list [Location]` (e.g., `/list Manor` or `/list GC`)."
                 )
-                edit_message_text(chat_id, msg_id, summary)
-            else:
-                edit_message_text(chat_id, msg_id, "❌ Error saving item to database.")
+                send_inline_keyboard(chat_id, welcome_text, [])
 
-            USER_SESSIONS.pop(chat_id, None)
+        # -------------------------------------------------------------
+        # BRANCH B: Callback Queries (Inline Button Click Events)
+        # -------------------------------------------------------------
+        elif "callback_query" in data:
+            cb = data["callback_query"]
+            callback_id = cb["id"]
+            chat_id = cb["message"]["chat"]["id"]
+            msg_id = cb["message"]["message_id"]
+            callback_data = cb["data"]
 
-        # --- SUB-FLOW 2: INSPECT ITEM DETAILS ---
-        # STEP 1: Location Selected for Listing -> Prompt for Category
-        elif callback_data.startswith("listloc:"):
-            location = callback_data.split(":", 1)[1]
+            answer_callback_query(callback_id)
+
+            # --- SUB-FLOW 1: ADD ITEM STEPS ---
             
-            categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
-            buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
-            buttons.append(("📦 All Categories", f"listcat:{location}:ALL"))
+            # Step 1: Category Selected -> Prompt for Location
+            if callback_data.startswith("cat:"):
+                session = USER_SESSIONS.get(chat_id)
+                if not session:
+                    edit_message_text(chat_id, msg_id, "⚠️ Session expired. Please re-upload the photo.")
+                    return {"status": "ok"}
+
+                category = callback_data.split(":", 1)[1]
+                session["category"] = category
+
+                locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
+                buttons = [(loc, f"loc:{loc}") for loc in locations]
+                edit_message_text(chat_id, msg_id, f"🏷️ Category: **{category}**\n\nSelect a **Location**:", buttons)
+
+            # Step 2: Location Selected -> Finalize & Save to DB, status default to clean
+            elif callback_data.startswith("loc:"):
+                session = USER_SESSIONS.get(chat_id)
+                if not session:
+                    edit_message_text(chat_id, msg_id, "⚠️ Session expired. Please re-upload the photo.")
+                    return {"status": "ok"}
+
+                location = callback_data.split(":", 1)[1]
+                session["location"] = location
+                session["status"] = "Clean"
+
+                success = save_item_to_db(session)
+                if success:
+                    summary = (
+                        f"✅ **Item Saved!**\n\n"
+                        f"• **Item:** {session['item_name']}\n"
+                        f"• **Category:** {session['category']}\n"
+                        f"• **Location:** {session['location']}\n"
+                        f"• **Status:** {session['status']}"
+                    )
+                    edit_message_text(chat_id, msg_id, summary)
+                else:
+                    edit_message_text(chat_id, msg_id, "❌ Error saving item to database.")
+
+                USER_SESSIONS.pop(chat_id, None)
+
+            # --- SUB-FLOW 2: INSPECT ITEM DETAILS ---
+            # STEP 1: Location Selected for Listing -> Prompt for Category
+            elif callback_data.startswith("listloc:"):
+                location = callback_data.split(":", 1)[1]
+                
+                categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
+                buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
+                buttons.append(("📦 All Categories", f"listcat:{location}:ALL"))
+                
+                edit_message_text(
+                    chat_id, msg_id, 
+                    f"📍 Location: **{location}**\n\nSelect a **Category** to filter by:", 
+                    buttons
+                )
+
+            # STEP 2: Category Selected -> Fetch & Render Items
+            elif callback_data.startswith("listcat:"):
+                _, location, category = callback_data.split(":", 2)
+                
+                items = get_items_by_location_and_category(location, category)
+                cat_display = "All Categories" if category == "ALL" else category
+
+                if not items:
+                    edit_message_text(chat_id, msg_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
+                    return {"status": "ok"}
+
+                # Update the selection message so user knows what's loaded
+                edit_message_text(chat_id, msg_id, f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):")
+
+                media_group = []
+                detail_buttons = []
+
+                for item_id, item_name, cat, loc, image_id, status, comments in items:
+                    # Add up to 10 photos to Telegram Media Album
+                    if image_id and len(media_group) < 10:
+                        media_group.append({
+                            "type": "photo",
+                            "media": image_id,
+                            "caption": f"#{item_id}: {item_name} ({cat})"
+                        })
+                    # Add inspection button for every item
+                    detail_buttons.append((f"ℹ️ Details: #{item_id} {item_name}", f"detail:{item_id}"))
+
+                # Send photo album if images exist
+                if media_group:
+                    send_media_group(chat_id, media_group)
+
+                # Send inspection buttons list
+                send_inline_keyboard(
+                    chat_id,
+                    f"👕 **Tap an item below for full details:**",
+                    detail_buttons
+                )
+            elif callback_data.startswith("detail:"):
+                item_id = int(callback_data.split(":", 1)[1])
+                item = get_item_by_id(item_id)
+
+                if not item:
+                    send_inline_keyboard(chat_id, "❌ Item not found.", [])
+                    return {"status": "ok"}
+
+                item_id, item_name, category, location, image_id, status, comments = item
+
+                caption = (
+                    f"🧥 **{item_name}** (ID: #{item_id})\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"🏷️ **Category:** {category or 'N/A'}\n"
+                    f"📍 **Location:** {location or 'N/A'}\n"
+                    f"🧼 **Status:** {status or 'Clean'}\n"
+                    f"📝 **Comments:** {comments or 'None'}"
+                )
+
+                action_buttons = [
+                    ("✏️ Change Name", f"editname:{item_id}"), 
+                    ("📝 Change comments", f"editcomment:{item_id}"),
+                    ("🏷️ Change Category", f"changecat:{item_id}"),
+                    ("📍 Change Location", f"changeloc:{item_id}"),
+                    ("🧼 Change Status", f"changest:{item_id}"),
+                    ("🗑️ Delete Item", f"delete:{item_id}")
+
+                ]
+
+                if image_id:
+                    send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
+                else:
+                    send_inline_keyboard(chat_id, caption, action_buttons)
             
-            edit_message_text(
-                chat_id, msg_id, 
-                f"📍 Location: **{location}**\n\nSelect a **Category** to filter by:", 
-                buttons
-            )
+            # Edit flow
+            # --- 1. CHANGE NAME ACTION ---
+            elif callback_data.startswith("editname:"):
+                item_id = int(callback_data.split(":")[1])
+                USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
+                # edit_message_text(chat_id, msg_id, "Selected edit name")
+                send_telegram_message(chat_id, "Please type the new name for this item:")
 
-        # STEP 2: Category Selected -> Fetch & Render Items
-        elif callback_data.startswith("listcat:"):
-            _, location, category = callback_data.split(":", 2)
+            elif callback_data.startswith("editcomment:"):
+                item_id = int(callback_data.split(":")[1])
+                USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
+                # edit_message_text(chat_id, msg_id, "Selected edit comment")
+                send_telegram_message(chat_id, "Please type a comment for this item:")
+
+            # --- 2.1 CHANGE ACTION ---
+            elif callback_data.startswith("change"):
+                parts = callback_data.split(":")
+                change_list = {
+                    # action: [list db table name, message, ]
+                    "changeloc": ["location_list", "location", "updateloc"],
+                    "changecat": ["category_list", "category", "updatecat"],
+                    "changest": ["status_list", "status", "updatest"]
+                }
+                param = change_list[parts[0]]
+                options = fetch_options_from_db(param[0])
+                item_id = int(parts[1])
+                # edit_message_text(chat_id, msg_id, f"Selected change {param[1]}")
+                # Build inline buttons for available options
+                buttons = [
+                    (opt, f"{param[2]}:{item_id}:{opt}") for opt in options
+                ]
+                send_inline_keyboard(chat_id, f"Select a new {param[1]}:", buttons)
+
+
+            # --- 2.2 SAVE SELECTION ---
+            elif callback_data.startswith("update"):
+                parts = callback_data.split(":")
+                item_id = int(parts[1])
+                new_param = parts[2]
+                field = {
+                    "updateloc": "location",
+                    "updatecat": "category",
+                    "updatest": "status"
+                }
+                edit_message_text(chat_id, msg_id, f"Selected {new_param}")
+                success = update_item_field(item_id, field[parts[0]], new_param)
+                
+                msg = f"✅ {field[parts[0]]} updated to **{new_param}**!" if success else f"❌ Failed to update {field[parts[0]]}."
+                send_telegram_message(chat_id, msg)
+
+
+            # --- 4. DELETE ITEM ACTION ---
+            elif callback_data.startswith("delete"):
+                item_id = int(callback_data.split(":")[1])
+                edit_message_text(chat_id, msg_id, "Selected delete item")
+                success = delete_item_from_db(item_id)
+                msg = "🗑️ Item deleted successfully!" if success else "❌ Failed to delete item."
+                send_telegram_message(chat_id, msg)
             
-            items = get_items_by_location_and_category(location, category)
-            cat_display = "All Categories" if category == "ALL" else category
-
-            if not items:
-                edit_message_text(chat_id, msg_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
-                return {"status": "ok"}
-
-            # Update the selection message so user knows what's loaded
-            edit_message_text(chat_id, msg_id, f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):")
-
-            media_group = []
-            detail_buttons = []
-
-            for item_id, item_name, cat, loc, image_id, status, comments in items:
-                # Add up to 10 photos to Telegram Media Album
-                if image_id and len(media_group) < 10:
-                    media_group.append({
-                        "type": "photo",
-                        "media": image_id,
-                        "caption": f"#{item_id}: {item_name} ({cat})"
-                    })
-                # Add inspection button for every item
-                detail_buttons.append((f"ℹ️ Details: #{item_id} {item_name}", f"detail:{item_id}"))
-
-            # Send photo album if images exist
-            if media_group:
-                send_media_group(chat_id, media_group)
-
-            # Send inspection buttons list
-            send_inline_keyboard(
-                chat_id,
-                f"👕 **Tap an item below for full details:**",
-                detail_buttons
-            )
-        elif callback_data.startswith("detail:"):
-            item_id = int(callback_data.split(":", 1)[1])
-            item = get_item_by_id(item_id)
-
-            if not item:
-                send_inline_keyboard(chat_id, "❌ Item not found.", [])
-                return {"status": "ok"}
-
-            item_id, item_name, category, location, image_id, status, comments = item
-
-            caption = (
-                f"🧥 **{item_name}** (ID: #{item_id})\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"🏷️ **Category:** {category or 'N/A'}\n"
-                f"📍 **Location:** {location or 'N/A'}\n"
-                f"🧼 **Status:** {status or 'Clean'}\n"
-                f"📝 **Comments:** {comments or 'None'}"
-            )
-
-            action_buttons = [
-                ("✏️ Change Name", f"editname:{item_id}"), 
-                ("📝 Change comments", f"editcomment:{item_id}"),
-                ("🏷️ Change Category", f"changecat:{item_id}"),
-                ("📍 Change Location", f"changeloc:{item_id}"),
-                ("🧼 Change Status", f"changest:{item_id}"),
-                ("🗑️ Delete Item", f"delete:{item_id}")
-
-            ]
-
-            if image_id:
-                send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
-            else:
-                send_inline_keyboard(chat_id, caption, action_buttons)
-        
-        # Edit flow
-        # --- 1. CHANGE NAME ACTION ---
-        elif callback_data.startswith("editname:"):
-            item_id = int(callback_data.split(":")[1])
-            USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
-            edit_message_text(chat_id, msg_id, "Selected edit name")
-            send_telegram_message(chat_id, "Please type the new name for this item:")
-
-        elif callback_data.startswith("editcomment:"):
-            item_id = int(callback_data.split(":")[1])
-            USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
-            edit_message_text(chat_id, msg_id, "Selected edit comment")
-            send_telegram_message(chat_id, "Please type a comment for this item:")
-
-        # --- 2.1 CHANGE ACTION ---
-        elif callback_data.startswith("change"):
-            parts = callback_data.split(":")
-            change_list = {
-                # action: [list db table name, message, ]
-                "changeloc": ["location_list", "location", "updateloc"],
-                "changecat": ["category_list", "category", "updatecat"],
-                "changest": ["status_list", "status", "updatest"]
-            }
-            param = change_list[parts[0]]
-            options = fetch_options_from_db(param[0])
-            item_id = int(parts[1])
-            edit_message_text(chat_id, msg_id, f"Selected change {param[1]}")
-            # Build inline buttons for available options
-            buttons = [
-                (opt, f"{param[2]}:{item_id}:{opt}") for opt in options
-            ]
-            send_inline_keyboard(chat_id, f"Select a new {param[1]}:", buttons)
-
-
-        # --- 2.2 SAVE SELECTION ---
-        elif callback_data.startswith("update"):
-            parts = callback_data.split(":")
-            item_id = int(parts[1])
-            new_param = parts[2]
-            field = {
-                "updateloc": "location",
-                "updatecat": "category",
-                "updatest": "status"
-            }
-            edit_message_text(chat_id, msg_id, f"Selected {new_param}")
-            success = update_item_field(item_id, field[parts[0]], new_param)
-            
-            msg = f"✅ {field[parts[0]]} updated to **{new_param}**!" if success else f"❌ Failed to update {field[parts[0]]}."
-            send_telegram_message(chat_id, msg)
-
-
-        # --- 4. DELETE ITEM ACTION ---
-        elif callback_data.startswith("delete"):
-            item_id = int(callback_data.split(":")[1])
-            edit_message_text(chat_id, msg_id, "Selected delete item")
-            success = delete_item_from_db(item_id)
-            msg = "🗑️ Item deleted successfully!" if success else "❌ Failed to delete item."
-            send_telegram_message(chat_id, msg)
-        
-
+    except Exception as e:
+        # Log the exact line and error to Render logs, but inform Telegram request was received
+        logger.error(f"Error handling webhook update: {e}", exc_info=True)
     return {"status": "ok"}
 
 # 5. Webhook Endpoint
