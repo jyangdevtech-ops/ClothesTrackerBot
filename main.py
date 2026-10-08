@@ -5,7 +5,7 @@ from fastapi import FastAPI, Request, HTTPException, Header, Depends
 import psycopg2
 from psycopg2 import sql
 import requests
-from typing import List
+from typing import List, Tuple, Optional, Dict, Any
 
 # 1. Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -130,6 +130,44 @@ def delete_item_from_db(item_id: int) -> bool:
         logger.error(f"Failed to delete item {item_id}: {e}")
         return False
     
+def list_items_by_location_and_category(chat_id, msg_id, location, category):
+
+    items = get_items_by_location_and_category(location, category)
+    cat_display = "All Categories" if category == "ALL" else category
+
+    if not items:
+        edit_message_text(chat_id, msg_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
+        return {"status": "ok"}
+
+    # Update the selection message so user knows what's loaded
+    edit_message_text(chat_id, msg_id, f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):")
+
+    media_group = []
+    detail_buttons = []
+
+    for item_id, item_name, cat, loc, image_id, status, comments in items:
+        # Add up to 10 photos to Telegram Media Album
+        if image_id and len(media_group) < 10:
+            media_group.append({
+                "type": "photo",
+                "media": image_id,
+                "caption": f"#{item_id}: {item_name} ({cat})"
+            })
+        # Add inspection button for every item
+        detail_buttons.append((f"ℹ️ Details: #{item_id} {item_name}", f"detail:{item_id}"))
+
+    # Send photo album if images exist
+    if media_group:
+        send_media_group(chat_id, media_group)
+
+    # Send inspection buttons list
+    send_inline_keyboard(
+        chat_id,
+        f"👕 **Tap an item below for full details:**",
+        detail_buttons
+    )
+    return
+
 def get_items_by_location_and_category(location_name: str, category_name: Optional[str] = None) -> List[Tuple]:
     """Retrieves clothes filtered by location and optionally by category."""
     conn = get_db_connection()
@@ -170,6 +208,40 @@ def get_item_by_id(item_id: int) -> Optional[Tuple]:
     cur.close()
     conn.close()
     return row
+
+def display_single_item(chat_id, item_id):
+    item = get_item_by_id(item_id)
+
+    if not item:
+        send_inline_keyboard(chat_id, "❌ Item not found.", [])
+        return {"status": "ok"}
+
+    item_id, item_name, category, location, image_id, status, comments = item
+
+    caption = (
+        f"🧥 **{item_name}** (ID: #{item_id})\n"
+        f"━━━━━━━━━━━━━━━━━━━\n"
+        f"🏷️ **Category:** {category or 'N/A'}\n"
+        f"📍 **Location:** {location or 'N/A'}\n"
+        f"🧼 **Status:** {status or 'Clean'}\n"
+        f"📝 **Comments:** {comments or 'None'}"
+    )
+
+    action_buttons = [
+        ("✏️ Change Name", f"editname:{item_id}"), 
+        ("📝 Change comments", f"editcomment:{item_id}"),
+        ("🏷️ Change Category", f"changecat:{item_id}"),
+        ("📍 Change Location", f"changeloc:{item_id}"),
+        ("🧼 Change Status", f"changest:{item_id}"),
+        ("🗑️ Delete Item", f"delete:{item_id}")
+
+    ]
+
+    if image_id:
+        send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
+    else:
+        send_inline_keyboard(chat_id, caption, action_buttons)
+    return
 
 # Helper to fetch dynamic list options from DB
 def fetch_options_from_db(table_name: str) -> List[str]:
@@ -263,20 +335,92 @@ async def telegram_webhook(request: Request):
             elif text.startswith("/list"):
                 # Check if user typed direct location (e.g., /list Manor) or wants interactive selection
                 param = text.replace("/list", "", 1).strip()
-                
                 if param:
-                    # Direct location provided -> Prompt for category right away
+                    param_lst = param.split("-", 1)
                     categories = fetch_options_from_db("category_list") or ["Tops", "Bottoms", "Outerwear"]
-                    buttons = [(cat, f"listcat:{param}:{cat}") for cat in categories]
-                    buttons.append(("📦 All Categories", f"listcat:{param}:ALL"))
-                    
-                    send_inline_keyboard(chat_id, f"📍 Location: **{param}**\n\nSelect a **Category** to filter by:", buttons)
+
+                    # Case 1: User specified both Location and Category (e.g., /list Manor-Tops or /list Manor-all)
+                    if len(param_lst) == 2:
+                        location = param_lst[0].strip()
+                        category = param_lst[1].strip()
+                        valid_categories_lower = {cat.lower() for cat in categories}
+
+                        # Check if user input matches (e.g. 'tops', 'TOPS', or 'all')
+                        # Check if category is either valid in DB or explicitly "all"
+                        if category.lower() in valid_categories_lower or category.lower() == "all":
+                            # Direct lookup & rendering
+                            items = get_items_by_location_and_category(location, category)
+                            cat_display = "All Categories" if category.lower() == "all" else category
+
+                            if not items:
+                                send_telegram_message(chat_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
+                            else:
+                                detail_buttons = [(f"ℹ️ Details: #{item[0]} {item[1]}", f"detail:{item[0]}") for item in items]
+                                send_inline_keyboard(
+                                    chat_id, 
+                                    f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):", 
+                                    detail_buttons
+                                )
+                        else:
+                            # Invalid category provided -> prompt with buttons using the extracted location
+                            buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
+                            buttons.append(("📦 All Categories", f"listcat:{location}:ALL"))
+                            send_inline_keyboard(
+                                chat_id, 
+                                f"📍 Location: **{location}**\n\n⚠️ Category `'{category}'` not recognized. Select a valid **Category**:", 
+                                buttons
+                            )
+
+                    # Case 2: User specified only Location (e.g., /list Manor)
+                    else:
+                        location = param_lst[0].strip()
+                        buttons = [(cat, f"listcat:{location}:{cat}") for cat in categories]
+                        buttons.append(("📦 All Categories", f"listcat:{location}:ALL"))
+                        send_inline_keyboard(
+                            chat_id, 
+                            f"📍 Location: **{location}**\n\nSelect a **Category** to filter by:", 
+                            buttons
+                        )
+
+                # Case 3: Plain /list -> Prompt for location selection first
                 else:
-                    # Step 1: Prompt for Location first
                     locations = fetch_options_from_db("location_list") or ["Manor", "GC"]
                     buttons = [(loc, f"listloc:{loc}") for loc in locations]
-                    
                     send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
+
+
+            elif text.startswith("/get"):
+                param = text.replace("/get", "", 1).strip()
+                
+                if param:
+                    if param.isdigit():
+                        item_id = int(param)
+                        display_single_item(chat_id, item_id)
+                    else:
+                        send_telegram_message(
+                            chat_id, 
+                            "⚠️ **Invalid ID Format:** Please specify a valid numeric ID (e.g., `/get 123`)."
+                        )
+                else:
+                    # Initialize state safely if user session doesn't exist yet
+                    if chat_id not in USER_SESSIONS:
+                        USER_SESSIONS[chat_id] = {}
+                    USER_SESSIONS[chat_id]["state"] = "awaiting_item_id"
+                    send_telegram_message(chat_id, "🔢 Please type the **Item ID** you are looking for:")
+
+            # 2. STATE HANDLER: User responding with an ID after plain /get
+            elif USER_SESSIONS.get(chat_id, {}).get("state") == "awaiting_item_id":
+                # Clear state immediately so subsequent text isn't treated as an ID
+                USER_SESSIONS[chat_id]["state"] = ""
+                
+                if text.isdigit():
+                    item_id = int(text)
+                    display_single_item(chat_id, item_id)
+                else:
+                    send_telegram_message(
+                        chat_id, 
+                        "❌ **Invalid Input:** Item ID must be a number (e.g., `123`). Please run `/get` again."
+                    )
 
             # update item name
             elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id].get("state") == "awaiting_new_name":
@@ -300,9 +444,18 @@ async def telegram_webhook(request: Request):
             # 3. COMMAND: /start -- default
             else:
                 welcome_text = (
-                    "👋 **Welcome to Closet Tracker!**\n\n"
-                    "• **To Add Clothes:** Simply send a **photo** with a caption (e.g., *Black Hoodie*).\n"
-                    "• **To List Clothes:** Type `/list [Location]` (e.g., `/list Manor` or `/list GC`)."
+                    "👗 **Welcome to TEGA!**\n"
+                    "*(Tracking Everything in G's Armoire)*\n\n"
+                    "Here is what I can do for you:\n\n"
+                    "➕ **Add Clothes:**\n"
+                    "• Send a **photo** with a caption (e.g., *Black Denim Jacket*).\n\n"
+                    "🔍 **Browse & Filter Closet:**\n"
+                    "• `/list` — Interactive location & category selector.\n"
+                    "• `/list Manor` — Set the location directly, then pick a category.\n"
+                    "• `/list Manor-Tops` — Direct filter by location & category (case-insensitive).\n\n"
+                    "• `/list Manor-all` — View all items at a location at once.\n\n"
+                    "🔢 **Inspect & Edit Items:**\n"
+                    "• `/get 123` or `/get` — Quickly view, edit, or delete an item by ID."
                 )
                 send_inline_keyboard(chat_id, welcome_text, [])
 
@@ -379,86 +532,24 @@ async def telegram_webhook(request: Request):
             elif callback_data.startswith("listcat:"):
                 _, location, category = callback_data.split(":", 2)
                 
-                items = get_items_by_location_and_category(location, category)
-                cat_display = "All Categories" if category == "ALL" else category
+                list_items_by_location_and_category(chat_id, msg_id, location, category)
 
-                if not items:
-                    edit_message_text(chat_id, msg_id, f"🧥 No items found under **{cat_display}** at **{location}**.")
-                    return {"status": "ok"}
-
-                # Update the selection message so user knows what's loaded
-                edit_message_text(chat_id, msg_id, f"🔍 Showing **{cat_display}** at **{location}** ({len(items)} items found):")
-
-                media_group = []
-                detail_buttons = []
-
-                for item_id, item_name, cat, loc, image_id, status, comments in items:
-                    # Add up to 10 photos to Telegram Media Album
-                    if image_id and len(media_group) < 10:
-                        media_group.append({
-                            "type": "photo",
-                            "media": image_id,
-                            "caption": f"#{item_id}: {item_name} ({cat})"
-                        })
-                    # Add inspection button for every item
-                    detail_buttons.append((f"ℹ️ Details: #{item_id} {item_name}", f"detail:{item_id}"))
-
-                # Send photo album if images exist
-                if media_group:
-                    send_media_group(chat_id, media_group)
-
-                # Send inspection buttons list
-                send_inline_keyboard(
-                    chat_id,
-                    f"👕 **Tap an item below for full details:**",
-                    detail_buttons
-                )
             elif callback_data.startswith("detail:"):
                 item_id = int(callback_data.split(":", 1)[1])
-                item = get_item_by_id(item_id)
-
-                if not item:
-                    send_inline_keyboard(chat_id, "❌ Item not found.", [])
-                    return {"status": "ok"}
-
-                item_id, item_name, category, location, image_id, status, comments = item
-
-                caption = (
-                    f"🧥 **{item_name}** (ID: #{item_id})\n"
-                    f"━━━━━━━━━━━━━━━━━━━\n"
-                    f"🏷️ **Category:** {category or 'N/A'}\n"
-                    f"📍 **Location:** {location or 'N/A'}\n"
-                    f"🧼 **Status:** {status or 'Clean'}\n"
-                    f"📝 **Comments:** {comments or 'None'}"
-                )
-
-                action_buttons = [
-                    ("✏️ Change Name", f"editname:{item_id}"), 
-                    ("📝 Change comments", f"editcomment:{item_id}"),
-                    ("🏷️ Change Category", f"changecat:{item_id}"),
-                    ("📍 Change Location", f"changeloc:{item_id}"),
-                    ("🧼 Change Status", f"changest:{item_id}"),
-                    ("🗑️ Delete Item", f"delete:{item_id}")
-
-                ]
-
-                if image_id:
-                    send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
-                else:
-                    send_inline_keyboard(chat_id, caption, action_buttons)
+                display_single_item(chat_id, item_id)
             
             # Edit flow
             # --- 1. CHANGE NAME ACTION ---
             elif callback_data.startswith("editname:"):
                 item_id = int(callback_data.split(":")[1])
                 USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
-                edit_message_caption(chat_id, msg_id, "Selected edit name" )
+                edit_message_caption(chat_id, msg_id, cb["message"].get("caption", "") + "\n\nSelected edit name" )
                 send_telegram_message(chat_id, "Please type the new name for this item:")
 
             elif callback_data.startswith("editcomment:"):
                 item_id = int(callback_data.split(":")[1])
                 USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
-                edit_message_caption(chat_id, msg_id, "Selected edit comment")
+                edit_message_caption(chat_id, msg_id, cb["message"].get("caption", "") + "\n\nSelected edit comment")
                 send_telegram_message(chat_id, "Please type a comment for this item:")
 
             # --- 2.1 CHANGE ACTION ---
@@ -473,7 +564,7 @@ async def telegram_webhook(request: Request):
                 param = change_list[parts[0]]
                 options = fetch_options_from_db(param[0])
                 item_id = int(parts[1])
-                edit_message_caption(chat_id, msg_id, f"Selected cchange{param[1]}" )
+                edit_message_caption(chat_id, msg_id, cb["message"].get("caption", "") + f"\n\nSelected change {param[1]}" )
 
                 # Build inline buttons for available options
                 buttons = [
@@ -502,7 +593,8 @@ async def telegram_webhook(request: Request):
             # --- 4. DELETE ITEM ACTION ---
             elif callback_data.startswith("delete"):
                 item_id = int(callback_data.split(":")[1])
-                edit_message_text(chat_id, msg_id, "Selected delete item")
+                edit_message_caption(chat_id, msg_id, cb["message"].get("caption", "") + f"\n\nSelected delete item {item_id}" )
+                # edit_message_text(chat_id, msg_id, "Selected delete item")
                 success = delete_item_from_db(item_id)
                 msg = "🗑️ Item deleted successfully!" if success else "❌ Failed to delete item."
                 send_telegram_message(chat_id, msg)
