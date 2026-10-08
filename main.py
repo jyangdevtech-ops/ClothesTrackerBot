@@ -425,7 +425,7 @@ async def telegram_webhook(request: Request):
 
             action_buttons = [
                 ("✏️ Change Name", f"editname:{item_id}"), 
-                ("📝 Change comments", f"editcomment:{item_id}")
+                ("📝 Change comments", f"editcomment:{item_id}"),
                 ("🏷️ Change Category", f"changecat:{item_id}"),
                 ("📍 Change Location", f"changeloc:{item_id}"),
                 ("🧼 Change Status", f"changest:{item_id}"),
@@ -434,9 +434,9 @@ async def telegram_webhook(request: Request):
             ]
 
             if image_id:
-                send_single_photo_with_buttons(chat_id, image_id, caption[0], action_buttons)
+                send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
             else:
-                send_inline_keyboard(chat_id, caption[0], action_buttons)
+                send_inline_keyboard(chat_id, caption, action_buttons)
         
         # Edit flow
         # --- 1. CHANGE NAME ACTION ---
