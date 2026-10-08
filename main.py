@@ -155,8 +155,8 @@ def fetch_options_from_db(table_name: str) -> List[str]:
         cur = conn.cursor()
         
         # Safely compose the query with a dynamic table name identifier
-        query = sql.SQL("SELECT name FROM {} ORDER BY id ASC;").format(
-            sql.Identifier(table_name)
+        query = psycopg2.sql.SQL("SELECT name FROM {} ORDER BY id ASC;").format(
+            psycopg2.sql.Identifier(table_name)
         )
         cur.execute(query)
         
