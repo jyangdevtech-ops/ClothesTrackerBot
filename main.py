@@ -102,6 +102,34 @@ def save_item_to_db(session_data: dict) -> bool:
         if conn:
             conn.close()
 
+def update_item_field(item_id: int, field_name: str, new_value: str) -> bool:
+    """Dynamically updates a specific column (e.g., 'name', 'category', 'location') for an item."""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Use sql.Identifier for safe column naming
+                query = sql.SQL("UPDATE clothes_item SET {} = %s WHERE id = %s;").format(
+                    sql.Identifier(field_name)
+                )
+                cur.execute(query, (new_value, item_id))
+                conn.commit()
+                return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to update {field_name} for item {item_id}: {e}")
+        return False
+
+def delete_item_from_db(item_id: int) -> bool:
+    """Deletes an item from the closet table by ID."""
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM clothes_item WHERE id = %s;", (item_id,))
+                conn.commit()
+                return cur.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to delete item {item_id}: {e}")
+        return False
+    
 def get_items_by_location_and_category(location_name: str, category_name: Optional[str] = None) -> List[Tuple]:
     """Retrieves clothes filtered by location and optionally by category."""
     conn = get_db_connection()
@@ -133,7 +161,7 @@ def get_item_by_id(item_id: int) -> Optional[Tuple]:
     conn = get_db_connection()
     cur = conn.cursor()
     query = """
-        SELECT id, item_name, category, location, image_id, status, comments, created_at
+        SELECT id, item_name, category, location, image_id, status, comments
         FROM clothes_item
         WHERE id = %s;
     """
@@ -241,8 +269,27 @@ async def telegram_webhook(request: Request):
                 
                 send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
 
-        # 3. COMMAND: /start
-        elif text.startswith("/start"):
+        # update item name
+        elif chat_id in USER_SESSION and USER_SESSION[chat_id]["state"] == "awaiting_new_name":
+            USER_SESSION[chat_id]["state"] = ""
+            item_id = USER_SESSION[chat_id]["item_id"]
+            success = update_item_field(item_id, "item_name", text)
+            reply = f"✅ Name updated to **{text}**!" if success else "❌ Failed to update name."
+            send_telegram_message(chat_id, reply)
+            return {"status": "ok"}
+
+        # update item comments
+        elif chat_id in USER_SESSION and USER_SESSION[chat_id]["state"] == "awaiting_new_comment":
+            USER_SESSION[chat_id]["state"] = ""
+            item_id = USER_SESSION[chat_id]["item_id"]
+            success = update_item_field(item_id, "comments", text)
+            reply = f"✅ Comment updated to **{text}**!" if success else "❌ Failed to update comment."
+            send_telegram_message(chat_id, reply)
+            return {"status": "ok"}
+
+
+        # 3. COMMAND: /start -- default
+        else:
             welcome_text = (
                 "👋 **Welcome to Closet Tracker!**\n\n"
                 "• **To Add Clothes:** Simply send a **photo** with a caption (e.g., *Black Hoodie*).\n"
@@ -377,14 +424,81 @@ async def telegram_webhook(request: Request):
             )
 
             action_buttons = [
+                ("✏️ Change Name", f"editname:{item_id}"), 
+                ("📝 Change comments", f"editcomment:{item_id}")
+                ("🏷️ Change Category", f"changecat:{item_id}"),
                 ("📍 Change Location", f"changeloc:{item_id}"),
-                ("🧼 Change Status", f"changest:{item_id}")
+                ("🧼 Change Status", f"changest:{item_id}"),
+                ("🗑️ Delete Item", f"delete:{item_id}")
+
             ]
 
             if image_id:
                 send_single_photo_with_buttons(chat_id, image_id, caption, action_buttons)
             else:
                 send_inline_keyboard(chat_id, caption, action_buttons)
+        
+        # Edit flow
+        # --- 1. CHANGE NAME ACTION ---
+        elif callback_data.startswith("editname:"):
+            item_id = int(callback_data.split(":")[1])
+            USER_SESSION[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
+            send_telegram_message(chat_id, "Please type the new name for this item:")
+
+        elif callback_data.startswith("editcomment:"):
+            item_id = int(callback_data.split(":")[1])
+            USER_SESSION[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
+            send_telegram_message(chat_id, "Please type a comment for this item:")
+
+        # --- 2.1 CHANGE ACTION ---
+        elif callback_data.startswith("change"):
+            parts = callback_data.split(":")
+            change_list = {
+                # action: [list db table name, message, ]
+                "changeloc": ["location_list", "Select a new category:", "updateloc"],
+                "changecat": ["category_list", "Select a new category:", "updatecat"],
+                "changest": ["status_list", "Select a new status:", "updatest"]
+            }
+            param = change_list[parts[0]]
+            options = fetch_options_from_db(param[0])
+            item_id = int(parts[1])
+
+            # Build inline buttons for available options
+            buttons = [
+                [{"text": opt, "callback_data": f"{param[2]}:{item_id}:{opt}"}]
+                for opt in options
+            ]
+            send_telegram_message(
+                chat_id, 
+                param[1], 
+                reply_markup={"inline_keyboard": buttons}
+            )
+
+        # --- 2.2 SAVE SELECTION ---
+        elif callback_data.startswith("update"):
+            parts = callback_data.split(":")
+            item_id = int(parts[1])
+            new_param = parts[2]
+            field = {
+                "updateloc": "location",
+                "updatecat": "category",
+                "updatest": "status"
+            }
+
+            success = update_item_field(item_id, field[parts[0]], new_param)
+            
+            msg = f"✅ {field[parts[0]]} updated to **{new_category}**!" if success else "❌ Failed to update category."
+            send_telegram_message(chat_id, msg)
+
+
+        # --- 4. DELETE ITEM ACTION ---
+        elif callback_data.startswith("delete"):
+            item_id = int(callback_data.split(":")[1])
+
+            success = delete_item_from_db(item_id)
+            msg = "🗑️ Item deleted successfully!" if success else "❌ Failed to delete item."
+            send_telegram_message(chat_id, msg)
+        
 
     return {"status": "ok"}
 
