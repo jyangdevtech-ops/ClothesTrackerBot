@@ -270,18 +270,18 @@ async def telegram_webhook(request: Request):
                 send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
 
         # update item name
-        elif chat_id in USER_SESSION and USER_SESSION[chat_id]["state"] == "awaiting_new_name":
-            USER_SESSION[chat_id]["state"] = ""
-            item_id = USER_SESSION[chat_id]["item_id"]
+        elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id]["state"] == "awaiting_new_name":
+            USER_SESSIONS[chat_id]["state"] = ""
+            item_id = USER_SESSIONS[chat_id]["item_id"]
             success = update_item_field(item_id, "item_name", text)
             reply = f"✅ Name updated to **{text}**!" if success else "❌ Failed to update name."
             send_telegram_message(chat_id, reply)
             return {"status": "ok"}
 
         # update item comments
-        elif chat_id in USER_SESSION and USER_SESSION[chat_id]["state"] == "awaiting_new_comment":
-            USER_SESSION[chat_id]["state"] = ""
-            item_id = USER_SESSION[chat_id]["item_id"]
+        elif chat_id in USER_SESSIONS and USER_SESSIONS[chat_id]["state"] == "awaiting_new_comment":
+            USER_SESSIONS[chat_id]["state"] = ""
+            item_id = USER_SESSIONS[chat_id]["item_id"]
             success = update_item_field(item_id, "comments", text)
             reply = f"✅ Comment updated to **{text}**!" if success else "❌ Failed to update comment."
             send_telegram_message(chat_id, reply)
