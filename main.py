@@ -442,12 +442,12 @@ async def telegram_webhook(request: Request):
         # --- 1. CHANGE NAME ACTION ---
         elif callback_data.startswith("editname:"):
             item_id = int(callback_data.split(":")[1])
-            USER_SESSION[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
+            USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
             send_telegram_message(chat_id, "Please type the new name for this item:")
 
         elif callback_data.startswith("editcomment:"):
             item_id = int(callback_data.split(":")[1])
-            USER_SESSION[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
+            USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
             send_telegram_message(chat_id, "Please type a comment for this item:")
 
         # --- 2.1 CHANGE ACTION ---
