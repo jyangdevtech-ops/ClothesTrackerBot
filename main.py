@@ -17,6 +17,7 @@ ALLOWED_USER_IDS = [int(uid) for uid in os.getenv("ALLOWED_USER_IDS", "12345678,
 TELEGRAM_SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "your_random_secret_string_123")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+USER_SESSIONS: Dict[int, Dict[str, Any]] = {}
 
 app = FastAPI(title="Closet Tracker Bot")
 
@@ -114,16 +115,14 @@ def get_items_by_location_and_category(location_name: str, category_name: Option
             SELECT id, item_name, category, location, image_id, status, comments
             FROM clothes_item
             WHERE LOWER(location) = LOWER(%s) 
-              AND LOWER(category) = LOWER(%s)
-              AND (status IS NULL OR status != 'Archived');
+              AND LOWER(category) = LOWER(%s);
         """
         cur.execute(query, (location_name, category_name))
     else:
         query = """
             SELECT id, item_name, category, location, image_id, status, comments
             FROM clothes_item
-            WHERE LOWER(location) = LOWER(%s)
-              AND (status IS NULL OR status != 'Archived');
+            WHERE LOWER(location) = LOWER(%s);
         """
         cur.execute(query, (location_name,))
         
@@ -244,7 +243,7 @@ async def telegram_webhook(request: Request):
                 send_inline_keyboard(chat_id, f"📍 Location: **{param}**\n\nSelect a **Category** to filter by:", buttons)
             else:
                 # Step 1: Prompt for Location first
-                locations = fetch_options_from_db("locations_list") or ["Manor", "GC", "GF Place"]
+                locations = fetch_options_from_db("locations_list") or ["Manor", "GC"]
                 buttons = [(loc, f"listloc:{loc}") for loc in locations]
                 
                 send_inline_keyboard(chat_id, "🔍 **Browse Closet**\n\nPlease select a **Location** first:", buttons)
