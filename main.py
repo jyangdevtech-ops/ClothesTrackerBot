@@ -465,7 +465,7 @@ async def telegram_webhook(request: Request):
 
             # Build inline buttons for available options
             buttons = [
-                (opt, f"callback_data:{param[2]}:{item_id}:{opt}") for opt in options
+                (opt, f"{param[2]}:{item_id}:{opt}") for opt in options
             ]
             send_inline_keyboard(chat_id, param[1], buttons)
 
@@ -473,17 +473,17 @@ async def telegram_webhook(request: Request):
         # --- 2.2 SAVE SELECTION ---
         elif callback_data.startswith("update"):
             parts = callback_data.split(":")
-            item_id = int(parts[2])
-            new_param = parts[3]
+            item_id = int(parts[1])
+            new_param = parts[2]
             field = {
                 "updateloc": "location",
                 "updatecat": "category",
                 "updatest": "status"
             }
 
-            success = update_item_field(item_id, field[parts[1]], new_param)
+            success = update_item_field(item_id, field[parts[0]], new_param)
             
-            msg = f"✅ {field[parts[1]]} updated to **{new_param}**!" if success else f"❌ Failed to update {field[parts[1]]}."
+            msg = f"✅ {field[parts[0]]} updated to **{new_param}**!" if success else f"❌ Failed to update {field[parts[0]]}."
             send_telegram_message(chat_id, msg)
 
 
