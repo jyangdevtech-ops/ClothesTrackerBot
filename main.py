@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # 2. Environment Variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-ALLOWED_USER_IDS = [uid for uid in os.getenv("ALLOWED_USER_IDS", "12345678,87654321").split(",")]
+ALLOWED_USER_IDS = [int(uid) for uid in os.getenv("ALLOWED_USER_IDS", "12345678,87654321").split(",")]
 TELEGRAM_SECRET_TOKEN = os.getenv("TELEGRAM_SECRET_TOKEN", "your_random_secret_string_123")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
