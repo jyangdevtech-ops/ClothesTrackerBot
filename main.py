@@ -153,8 +153,13 @@ def fetch_options_from_db(table_name: str) -> List[str]:
     try:
         conn = get_db_connection()
         cur = conn.cursor()
-        # Safe table formatting for internal controlled table names
-        cur.execute("SELECT name FROM %s ORDER BY id ASC;", table_name)
+        
+        # Safely compose the query with a dynamic table name identifier
+        query = sql.SQL("SELECT name FROM {} ORDER BY id ASC;").format(
+            sql.Identifier(table_name)
+        )
+        cur.execute(query)
+        
         rows = cur.fetchall()
         cur.close()
         return [row[0] for row in rows]
