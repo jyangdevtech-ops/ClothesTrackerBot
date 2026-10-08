@@ -3,6 +3,7 @@ import logging
 from typing import List, Tuple, Optional
 from fastapi import FastAPI, Request, HTTPException, Header, Depends
 import psycopg2
+from psycopg2 import sql
 import requests
 from typing import List
 
@@ -149,26 +150,17 @@ def get_item_by_id(item_id: int) -> Optional[Tuple]:
 # Helper to fetch dynamic list options from DB
 def fetch_options_from_db(table_name: str) -> List[str]:
     """Queries PostgreSQL to get dynamic option lists for buttons."""
-    conn = None
     try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        
-        # Safely compose the query with a dynamic table name identifier
-        query = psycopg2.sql.SQL("SELECT name FROM {} ORDER BY id ASC;").format(
-            psycopg2.sql.Identifier(table_name)
-        )
-        cur.execute(query)
-        
-        rows = cur.fetchall()
-        cur.close()
-        return [row[0] for row in rows]
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                query = sql.SQL("SELECT name FROM {} ORDER BY id ASC;").format(
+                    sql.Identifier(table_name)
+                )
+                cur.execute(query)
+                return [row[0] for row in cur.fetchall()]
     except Exception as e:
         logger.error(f"Error fetching from {table_name}: {e}")
         return []
-    finally:
-        if conn:
-            conn.close()
 # --- Telegram API Helpers ---
 
 def edit_message_text(chat_id: int, message_id: int, text: str, buttons: list = None):
