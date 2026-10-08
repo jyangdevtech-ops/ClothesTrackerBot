@@ -278,7 +278,7 @@ async def telegram_webhook(request: Request):
             buttons = [(loc, f"loc:{loc}") for loc in locations]
             edit_message_text(chat_id, msg_id, f"🏷️ Category: **{category}**\n\nSelect a **Location**:", buttons)
 
-        # Step 2: Location Selected -> Prompt for Status
+        # Step 2: Location Selected -> Finalize & Save to DB, status default to clean
         elif callback_data.startswith("loc:"):
             session = USER_SESSIONS.get(chat_id)
             if not session:
@@ -287,24 +287,7 @@ async def telegram_webhook(request: Request):
 
             location = callback_data.split(":", 1)[1]
             session["location"] = location
-
-            statuses = fetch_options_from_db("status_list") or ["Clean", "Dirty"]
-            buttons = [(st, f"st:{st}") for st in statuses]
-            edit_message_text(
-                chat_id, msg_id,
-                f"🏷️ Category: **{session['category']}**\n📍 Location: **{location}**\n\nSelect **Status**:",
-                buttons
-            )
-
-        # Step 3: Status Selected -> Finalize & Save to DB
-        elif callback_data.startswith("st:"):
-            session = USER_SESSIONS.get(chat_id)
-            if not session:
-                edit_message_text(chat_id, msg_id, "⚠️ Session expired. Please re-upload the photo.")
-                return {"status": "ok"}
-
-            status = callback_data.split(":", 1)[1]
-            session["status"] = status
+            session["status"] = "Clean"
 
             success = save_item_to_db(session)
             if success:
