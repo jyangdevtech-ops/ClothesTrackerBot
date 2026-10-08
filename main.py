@@ -74,31 +74,27 @@ def send_media_group(chat_id: int, media_list: list):
 def answer_callback_query(callback_id: str):
     requests.post(f"{TELEGRAM_API}/answerCallbackQuery", json={"callback_query_id": callback_id})
 
-def add_clothes_item(
-    item_name: str,
-    category: Optional[str] = None,
-    location: Optional[str] = "Manor",
-    image_id: Optional[str] = None,
-    comments: Optional[str] = None,
-    status: Optional[str] = "Clean"
-) -> bool:
-    """Inserts a new clothing item into the clothes_item table."""
+def save_item_to_db(session_data: dict) -> bool:
     conn = None
     try:
-        conn = get_db_connection()
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        
         query = """
-            INSERT INTO clothes_item (item_name, category, location, image_id, comments, status)
-            VALUES (%s, %s, %s, %s, %s, %s);
+            INSERT INTO clothes_item (item_name, category, location, image_id, status)
+            VALUES (%s, %s, %s, %s, %s);
         """
-        cur.execute(query, (item_name, category, location, image_id, comments, status))
-        
+        cur.execute(query, (
+            session_data.get("item_name"),
+            session_data.get("category"),
+            session_data.get("location"),
+            session_data.get("file_id"),
+            session_data.get("status", "Clean")
+        ))
         conn.commit()
         cur.close()
         return True
     except Exception as e:
-        logger.error(f"Database insertion error: {e}")
+        logger.error(f"DB Error: {e}")
         if conn:
             conn.rollback()
         return False
