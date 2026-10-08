@@ -215,7 +215,10 @@ async def telegram_webhook(request: Request):
     # Get user_id from message or callback_query
     user_id = None
     if "message" in data:
-        user_id = data["message"]["from"]["id"]
+        user_from = data["message"]["from"]
+        if user_from.get("is_bot", False):
+            return {"status": "ok"}
+        user_id = user_from["id"]
         chat_id = data["message"]["chat"]["id"]
     elif "callback_query" in data:
         user_id = data["callback_query"]["from"]["id"]
@@ -443,11 +446,13 @@ async def telegram_webhook(request: Request):
         elif callback_data.startswith("editname:"):
             item_id = int(callback_data.split(":")[1])
             USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
+            edit_message_text(chat_id, msg_id, "Selected edit name")
             send_telegram_message(chat_id, "Please type the new name for this item:")
 
         elif callback_data.startswith("editcomment:"):
             item_id = int(callback_data.split(":")[1])
             USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
+            edit_message_text(chat_id, msg_id, "Selected edit comment")
             send_telegram_message(chat_id, "Please type a comment for this item:")
 
         # --- 2.1 CHANGE ACTION ---
@@ -455,19 +460,19 @@ async def telegram_webhook(request: Request):
             parts = callback_data.split(":")
             change_list = {
                 # action: [list db table name, message, ]
-                "changeloc": ["location_list", "Select a new location:", "updateloc"],
-                "changecat": ["category_list", "Select a new category:", "updatecat"],
-                "changest": ["status_list", "Select a new status:", "updatest"]
+                "changeloc": ["location_list", "location", "updateloc"],
+                "changecat": ["category_list", "category", "updatecat"],
+                "changest": ["status_list", "status", "updatest"]
             }
             param = change_list[parts[0]]
             options = fetch_options_from_db(param[0])
             item_id = int(parts[1])
-
+            edit_message_text(chat_id, msg_id, f"Selected change {param[1]}")
             # Build inline buttons for available options
             buttons = [
                 (opt, f"{param[2]}:{item_id}:{opt}") for opt in options
             ]
-            send_inline_keyboard(chat_id, param[1], buttons)
+            send_inline_keyboard(chat_id, f"Select a new {param[1]}:", buttons)
 
 
         # --- 2.2 SAVE SELECTION ---
@@ -480,7 +485,7 @@ async def telegram_webhook(request: Request):
                 "updatecat": "category",
                 "updatest": "status"
             }
-
+            edit_message_text(chat_id, msg_id, f"Selected {new_param}")
             success = update_item_field(item_id, field[parts[0]], new_param)
             
             msg = f"✅ {field[parts[0]]} updated to **{new_param}**!" if success else f"❌ Failed to update {field[parts[0]]}."
@@ -490,7 +495,7 @@ async def telegram_webhook(request: Request):
         # --- 4. DELETE ITEM ACTION ---
         elif callback_data.startswith("delete"):
             item_id = int(callback_data.split(":")[1])
-
+            edit_message_text(chat_id, msg_id, "Selected delete item")
             success = delete_item_from_db(item_id)
             msg = "🗑️ Item deleted successfully!" if success else "❌ Failed to delete item."
             send_telegram_message(chat_id, msg)
