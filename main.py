@@ -196,6 +196,11 @@ def edit_message_text(chat_id: int, message_id: int, text: str, buttons: list = 
         }
     requests.post(f"{TELEGRAM_API}/editMessageText", json=payload)
 
+def edit_message_caption(chat_id: int, message_id: int, caption: str):
+    """Edits the text caption of an existing photo message."""
+    payload = {"chat_id": chat_id, "message_id": message_id, "caption": caption, "parse_mode": "Markdown"}
+    requests.post(f"{TELEGRAM_API}/editMessageCaption", json=payload)
+
 
 def send_inline_keyboard(chat_id: int, text: str, buttons: list):
     """Sends a new message with inline buttons."""
@@ -447,13 +452,13 @@ async def telegram_webhook(request: Request):
             elif callback_data.startswith("editname:"):
                 item_id = int(callback_data.split(":")[1])
                 USER_SESSIONS[chat_id] = {"state": "awaiting_new_name", "item_id": item_id}
-                # edit_message_text(chat_id, msg_id, "Selected edit name")
+                edit_message_caption(chat_id, msg_id, "Selected edit name" )
                 send_telegram_message(chat_id, "Please type the new name for this item:")
 
             elif callback_data.startswith("editcomment:"):
                 item_id = int(callback_data.split(":")[1])
                 USER_SESSIONS[chat_id] = {"state": "awaiting_new_comment", "item_id": item_id}
-                # edit_message_text(chat_id, msg_id, "Selected edit comment")
+                edit_message_caption(chat_id, msg_id, "Selected edit comment")
                 send_telegram_message(chat_id, "Please type a comment for this item:")
 
             # --- 2.1 CHANGE ACTION ---
@@ -468,7 +473,8 @@ async def telegram_webhook(request: Request):
                 param = change_list[parts[0]]
                 options = fetch_options_from_db(param[0])
                 item_id = int(parts[1])
-                # edit_message_text(chat_id, msg_id, f"Selected change {param[1]}")
+                edit_message_caption(chat_id, msg_id, f"Selected cchange{param[1]}" )
+
                 # Build inline buttons for available options
                 buttons = [
                     (opt, f"{param[2]}:{item_id}:{opt}") for opt in options
